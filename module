@@ -1,0 +1,22 @@
+{
+  "id": "od2e-iniciativa",
+  "title": "OD2E Iniciativa",
+  "description": "Sistema de iniciativa para Old Dragon 2",
+  "version": "1.0.0",
+  "compatibility": {
+    "minimum": "12",
+    "verified": "12"
+  },
+  "authors": [
+    {
+      "name": "RPANeto",
+      "email": "raimundopaneto@hotmail.com",
+      "discord": "raimundopaneto",
+      "flags": {}
+    }
+  ],
+  "scripts": [
+    "scripts/od2e-iniciativa.js"
+  ],
+  "manifest": "modules/od2e-iniciativa/module.json"
+}
