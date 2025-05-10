@@ -1,0 +1,353 @@
+Hooks.on("renderCombatTracker", (app, html, data) => {
+  // Aumenta a largura da tela de combate em 25%
+  const combatTracker = html.closest('.combat-tracker');
+  const currentWidth = combatTracker.width();
+  combatTracker.css('width', `${currentWidth * 1.25}px`);
+
+  html.find(".combatant").each((i, el) => {
+    const combatantId = el.dataset.combatantId;
+    const combatant = game.combat.combatants.get(combatantId);
+    const actor = combatant?.actor;
+
+    if (!actor) return;
+
+    const isNPC = actor.type === "npc" || actor.type === "monster" || actor.hasPlayerOwner === false;
+
+    $(el).find(".roll").remove();
+
+    if (isNPC) {
+      // Atribui iniciativa 0 automaticamente se ainda não tiver valor
+      if (combatant.initiative === null) {
+        combatant.update({ initiative: 0 });
+      }
+    }
+
+    // Adiciona a exibição da vida (HP) de forma editável e centralizada para todos (jogadores e NPCs)
+    const hpDiv = $('<div class="hp-container"></div>');
+    hpDiv.css({
+      'position': 'absolute',
+      'top': '55%',
+      'left': '50%',
+      'transform': 'translate(-50%, -50%)',
+      'display': 'flex',
+      'align-items': 'center',
+      'gap': '5px',
+      'width': 'auto',
+    });
+
+    const hpLabel = $('<span style="font-size: 0.8em; color: white; white-space: nowrap;">PV:</span>');
+    hpDiv.append(hpLabel);
+
+    const hpInput = $('<input type="text" class="hp-input" style="width: 50px; font-size: 0.8em; text-align: center; color: white;">'); // Alterado para branco
+    hpInput.val(actor.system.hp.value);
+    hpInput.on('change', async function () {
+      const newHp = parseInt($(this).val());
+      if (!isNaN(newHp)) {
+        await actor.update({ 'system.hp.value': newHp });
+        // Atualiza a exibição no Combat Tracker após a atualização
+        app.render();
+      } else {
+        ui.notifications.warn("Valor de PV inválido.");
+        $(this).val(actor.system.hp.value);
+      }
+    });
+    hpDiv.append(hpInput);
+    $(el).append(hpDiv);
+
+
+    if (!isNPC) {
+      // Jogadores (não-NPCs) recebem botão de rolagem
+      const rollButton = $('<button class="roll-button">►</button>');
+
+      rollButton.css({
+        'font-size': '1.75em',
+        'padding': '0',
+        'border-radius': '5px',
+        'border': 'none',
+        'cursor': 'pointer',
+        'background': 'none',
+        'color': 'white',
+        'line-height': '1',
+        'width': 'auto',
+        'height': 'auto',
+        'display': 'inline-block',
+        'min-width': 'auto',
+        'min-height': 'auto',
+        'text-align': 'center',
+        'position': 'absolute',
+        'top': '25%',
+        'left': 'auto',
+        'right': '40px',
+        'transform': 'translate(0, -25%)'
+      });
+
+      $(el).append(rollButton);
+
+      const iniciativaField = $('<div class="iniciativa-field"></div>');
+      iniciativaField.css({
+        'position': 'absolute',
+        'top': 'calc(25% + 25px)',
+        'right': '10px',
+        'font-size': '0.9em',
+        'color': 'white',
+        'text-align': 'center'
+      });
+
+      $(el).append(iniciativaField);
+
+      rollButton.on("click", async () => {
+        const valorDex = actor.system.destreza;
+        const valorWis = actor.system.sabedoria;
+
+        const atributoEscolhido = valorDex >= valorWis ? "dex" : "wis";
+        const nomeAtributo = atributoEscolhido === "dex" ? "Destreza" : "Sabedoria";
+        const valorAtributo = atributoEscolhido === "dex" ? valorDex : valorWis;
+
+        const roll = await new Roll("1d20", { attr: valorAtributo }).roll({ async: true });
+
+        const sucesso = roll.total < valorAtributo;
+        let iniciativaFinal = roll.total;
+
+        if (!sucesso) {
+          const menores = game.combat.combatants
+            .filter(c => c.initiative !== null)
+            .map(c => c.initiative);
+          const menorIniciativa = menores.length > 0 ? Math.min(...menores) : 0;
+          iniciativaFinal = menorIniciativa - 1;
+        }
+
+        await combatant.update({ initiative: iniciativaFinal });
+        app.render();
+
+        rollButton.remove();
+
+        const corTexto = sucesso ? "green" : "red";
+        const statusTexto = sucesso ? "Sucesso!" : "Fracasso!";
+
+        iniciativaField.html(`<span style="color: ${corTexto};"><strong>Iniciativa: ${roll.total}</strong></span>`);
+
+        const messageContent = `
+          <p><strong>${actor.name}</strong> rolou iniciativa usando <strong>${nomeAtributo}</strong> (${valorAtributo}).</p>
+          <p>Resultado: <strong>${roll.total}</strong> (${roll.formula})</p>
+          <p style="color: ${corTexto};"><strong>${statusTexto}</strong></p>
+        `;
+
+        ChatMessage.create({
+          content: messageContent,
+          speaker: ChatMessage.getSpeaker({ actor: actor })
+        });
+      });
+    }
+  });
+});
+function createCarouselElement() {
+  let existing = document.getElementById("combat-carousel");
+  if (existing) return existing;
+
+  const carousel = document.createElement("div");
+  carousel.id = "combat-carousel";
+  document.body.appendChild(carousel);
+  return carousel;
+}
+
+function createCarouselStyle() {
+  if (document.getElementById("carousel-style")) return;
+
+  const style = document.createElement("style");
+  style.id = "carousel-style";
+  style.innerHTML = `
+    #combat-carousel {
+      position: fixed;
+      top: 10px;
+      left: 50%;
+      transform: translateX(-50%);
+      z-index: 1000;
+      background: rgba(15, 15, 15, 0.4);
+      padding: 8px 14px;
+      border-radius: 10px;
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      box-shadow: 0 0 10px black;
+    }
+    .carousel-item {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      font-size: 0.75em;
+      color: white;
+      border: 2px solid transparent;
+      border-radius: 6px;
+      padding: 4px;
+      background: #222;
+    }
+    .carousel-item img {
+      width: 40px;
+      height: 40px;
+      border-radius: 50%;
+      border: 1px solid white;
+      object-fit: cover;
+    }
+    .carousel-item-name {
+      margin-top: 4px;
+      max-width: 64px;
+      text-align: center;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .carousel-controls button {
+      font-size: 1.2em;
+      background: rgba(255,255,255,0.1);
+      color: white;
+      border: 1px solid white;
+      border-radius: 5px;
+      padding: 2px 6px;
+      cursor: pointer;
+    }
+    .carousel-controls {
+      display: flex;
+      gap: 6px;
+      margin-top: 4px;
+    }
+    .carousel-round {
+      font-size: 0.8em;
+      color: white;
+      margin-top: 4px;
+      text-align: center;
+    }
+  `;
+  document.head.appendChild(style);
+}
+
+function updateCarousel() {
+  const combat = game.combat;
+  if (!combat || combat.turns.length === 0) {
+    removeCarousel();
+    return;
+  }
+
+  createCarouselStyle();
+  const carousel = createCarouselElement();
+  carousel.innerHTML = "";
+
+  for (let i = 0; i < combat.turns.length; i++) {
+    const c = combat.turns[i];
+    const token = canvas.tokens.get(c.tokenId);
+    if (!token) continue;
+
+    const isHidden = token.document.hidden;
+    if (isHidden && !game.user.isGM) continue;
+
+    const actor = c.actor;
+    const system = actor.system;
+    const pvAtual = system?.hp?.value ?? 0;
+    const pvMax = system?.hp?.max ?? pvAtual;
+    const incapacitado = pvAtual <= 0;
+    const isTurn = combat.turn === i;
+
+    const item = document.createElement("div");
+    item.className = "carousel-item";
+
+    if (isTurn) item.style.border = "2px solid gold";
+    if (incapacitado || isHidden) item.style.opacity = "0.5";
+
+    const img = document.createElement("img");
+    img.src = token.document.texture.src || actor.img || "icons/svg/mystery-man.svg";
+    item.appendChild(img);
+
+    const name = document.createElement("div");
+    name.className = "carousel-item-name";
+    name.innerText = token.name;
+    item.appendChild(name);
+
+    const pvInfo = document.createElement("div");
+    pvInfo.innerText = `❤️ ${pvAtual} / ${pvMax}`;
+    item.appendChild(pvInfo);
+
+    if (incapacitado) {
+      const deadNote = document.createElement("div");
+      deadNote.style.color = "red";
+      deadNote.innerText = "☠️ Incapacitado";
+      item.appendChild(deadNote);
+    }
+
+    if (isTurn) {
+      const turnNote = document.createElement("div");
+      turnNote.style.color = "gold";
+      turnNote.innerText = "🔁 Em turno";
+      item.appendChild(turnNote);
+    }
+
+    carousel.appendChild(item);
+  }
+
+  // GM Controls
+  if (game.user.isGM) {
+    const container = document.createElement("div");
+    container.style.display = "flex";
+    container.style.flexDirection = "column";
+    container.style.alignItems = "center";
+
+    const controls = document.createElement("div");
+    controls.className = "carousel-controls";
+
+    const btnPrev = document.createElement("button");
+    btnPrev.textContent = "⏮️";
+    btnPrev.title = "Voltar turno";
+    btnPrev.onclick = () => game.combat.previousTurn();
+    controls.appendChild(btnPrev);
+
+    const btnNext = document.createElement("button");
+    btnNext.textContent = "⏭️";
+    btnNext.title = "Avançar turno";
+    btnNext.onclick = () => game.combat.nextTurn();
+    controls.appendChild(btnNext);
+
+    const btnRound = document.createElement("button");
+    btnRound.textContent = "🔁";
+    btnRound.title = "Nova rodada";
+    btnRound.onclick = () => game.combat.nextRound();
+    controls.appendChild(btnRound);
+
+    const btnEnd = document.createElement("button");
+    btnEnd.textContent = "⛔";
+    btnEnd.title = "Encerrar combate";
+    btnEnd.onclick = () => game.combat.endCombat();
+    controls.appendChild(btnEnd);
+
+    const btnRefresh = document.createElement("button");
+    btnRefresh.textContent = "🔄";
+    btnRefresh.title = "Atualizar carrossel";
+    btnRefresh.onclick = () => updateCarousel();
+    controls.appendChild(btnRefresh);
+
+    const round = document.createElement("div");
+    round.className = "carousel-round";
+    round.innerText = `🧭 Rodada: ${combat.round}`;
+
+    container.appendChild(controls);
+    container.appendChild(round);
+    carousel.appendChild(container);
+  }
+}
+
+function removeCarousel() {
+  const carousel = document.getElementById("combat-carousel");
+  if (carousel) carousel.remove();
+
+  const style = document.getElementById("carousel-style");
+  if (style) style.remove();
+}
+
+// Hooks
+Hooks.on("createCombat", updateCarousel);
+Hooks.on("updateCombat", updateCarousel);
+Hooks.on("deleteCombat", removeCarousel);
+Hooks.on("updateToken", updateCarousel);
+Hooks.on("createCombatant", updateCarousel);
+
+// Render inicial
+Hooks.once("ready", () => {
+  if (game.combat && game.combat.turns.length > 0) updateCarousel();
+});
